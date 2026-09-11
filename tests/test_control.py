@@ -940,3 +940,95 @@ async def test_settings_write_refreshes_expired_key_first(
     assert rebuilt is not fake
     assert rebuilt.calls == ["set_auto_lock"]
     assert rebuilt.disconnects == 1
+
+
+class _RetryEffectManager(FakeKeyManager):
+    """Refresh double that arms an effect on the rebuilt retry facade."""
+
+    def __init__(self, key: DeviceKey, command: str, retry_effect: Exception) -> None:
+        super().__init__(key)
+        self._command = command
+        self._retry_effect = retry_effect
+
+    async def refresh(self, serial: str, *, force: bool = False) -> DeviceKey:
+        new = await super().refresh(serial, force=force)
+        FakeLock.instances[-1].effects[self._command] = self._retry_effect
+        return new
+
+
+def make_retry_control(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command: str,
+    retry_effect: Exception,
+) -> tuple[DanalockControl, FakeLock, _RetryEffectManager]:
+    """A control whose first attempt rejects the token and whose retry is
+    armed with `retry_effect` (retry-branch coverage, spec 0006 R3/R5)."""
+    install_fake_lock(monkeypatch)
+
+    async def _no_transport(_self: DanalockControl, _address: str) -> None:
+        return None
+
+    monkeypatch.setattr(DanalockControl, "_transport_factory", _no_transport)
+    manager = _RetryEffectManager(make_key(), command, retry_effect)
+    control = DanalockControl(hass, SERIAL_NORMALIZED, manager, make_state())
+    manager.control = control
+    fake = FakeLock.instances[-1]
+    fake.transport_factory = None
+    fake.effects[command] = CommandError(0x5E, 4, 2)
+    return control, fake, manager
+
+
+async def test_retry_nothing_changed_is_success(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A NOTHING_CHANGED status on the retry is a success, not an error
+    (spec 0006 R3)."""
+    control, fake, manager = make_retry_control(
+        hass, monkeypatch, command="unlock", retry_effect=CommandError(0x07, 4, 2)
+    )
+
+    await control.operate("unlock")
+
+    assert manager.refresh_calls == [(SERIAL_NORMALIZED, True)]
+    assert fake.disconnects == 2
+    assert FakeLock.instances[-1].calls == ["unlock"]
+
+
+async def test_retry_transport_error_is_wrapped(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transport error on the retry maps to a LockControlError
+    (spec 0006 R3/R5)."""
+    control, fake, _ = make_retry_control(
+        hass,
+        monkeypatch,
+        command="unlock",
+        retry_effect=TlsSessionError("certificate verification failed"),
+    )
+
+    with pytest.raises(LockControlError, match="secure session"):
+        await control.operate("unlock")
+
+    assert fake.disconnects == 2
+    assert FakeLock.instances[-1].disconnects == 1
+
+
+async def test_device_information_retry_transport_error_is_wrapped(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transport error on the device-information retry is wrapped
+    (specs 0006 R3/R5, 0009)."""
+    control, fake, _ = make_retry_control(
+        hass,
+        monkeypatch,
+        command="device_information",
+        retry_effect=TimeoutError("no result within 10s"),
+    )
+
+    with pytest.raises(LockControlError, match="Bluetooth"):
+        await control.device_information()
+
+    assert fake.disconnects == 2
+    assert FakeLock.instances[-1].disconnects == 1

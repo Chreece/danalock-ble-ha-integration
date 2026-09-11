@@ -8,6 +8,7 @@ cloud side runs the real installed client against the mock transport.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import timedelta
 from typing import Any
 
@@ -32,7 +33,10 @@ from pydanalock.ble import DeviceInformation
 from pydanalock.cloud import FirmwareVersion
 from pydanalock.cloud import __version__ as cloud_version
 from custom_components.danalock_ble.update import (
+    FIRMWARE_POLL_INTERVAL,
+    FIRMWARE_RETRY_INTERVAL,
     DanalockFirmwareUpdateEntity,
+    _CycleOutcome,
     version_is_newer,
 )
 from tests.conftest import (
@@ -455,3 +459,76 @@ async def test_pypi_cloud_has_firmware_lookup() -> None:
     assert FirmwareVersion(
         firmware_identifier="x", maturity="production", url="u", version="1.2.3"
     ).version == "1.2.3"
+
+
+class StubFirmwareClient:
+    """Firmware cloud client test double that raises a configured effect."""
+
+    def __init__(self, effect: Exception) -> None:
+        self.effect = effect
+        self.calls = 0
+
+    async def latest_firmware(self, serial: str) -> Any:
+        self.calls += 1
+        raise self.effect
+
+
+def make_unregistered_entity(effect: Exception) -> DanalockFirmwareUpdateEntity:
+    """A firmware entity that was never added to hass."""
+    return DanalockFirmwareUpdateEntity(
+        StubFirmwareClient(effect),  # type: ignore[arg-type]
+        StubControl(make_info()),
+        SERIAL_NORMALIZED,
+    )
+
+
+async def test_cycle_without_hass_returns_immediately(
+    hass: HomeAssistant,
+) -> None:
+    """A cycle fired after removal (`hass is None`) does no work and does
+    not re-arm (spec 0009)."""
+    entity = make_unregistered_entity(RuntimeError("client is closed"))
+    assert entity.hass is None
+
+    await entity._async_cycle()
+
+    assert entity._unsub_cycle is None
+    assert entity._cycle_in_flight is False
+
+
+async def test_cycle_skips_write_when_removed_mid_refresh(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entity removed while its refresh was in flight writes no state and
+    does not re-arm (spec 0010 R2)."""
+    entity = make_unregistered_entity(RuntimeError("client is closed"))
+    entity.hass = hass
+    writes: list[int] = []
+    monkeypatch.setattr(entity, "async_write_ha_state", lambda: writes.append(1))
+
+    async def _refresh() -> _CycleOutcome:
+        entity.hass = None
+        return _CycleOutcome(FIRMWARE_POLL_INTERVAL)
+
+    monkeypatch.setattr(entity, "_async_refresh", _refresh)
+
+    await entity._async_cycle()
+
+    assert writes == []
+    assert entity._unsub_cycle is None
+    assert entity._cycle_in_flight is False
+
+
+async def test_refresh_retries_when_cloud_client_closed(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A closed cloud client (shutdown race) returns the retry interval and
+    logs at debug (spec 0009)."""
+    caplog.set_level(logging.DEBUG)
+    entity = make_unregistered_entity(RuntimeError("client is closed"))
+
+    outcome = await entity._async_refresh()
+
+    assert outcome.next_delay == FIRMWARE_RETRY_INTERVAL
+    assert outcome.failed is False
+    assert "latest firmware lookup skipped" in caplog.text

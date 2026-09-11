@@ -272,7 +272,15 @@ async def test_refresh_timer_fires_and_unload_cancels_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The 30 s history poll runs on its timer and stops with the entry
-    (spec 0003 R2a)."""
+    (spec 0003 R2a).
+
+    `async_track_time_interval` dispatches the non-callback `_refresh_states`
+    through the executor as a *background* job, which a plain
+    `async_block_till_done()` does not await. Waiting for background tasks
+    after firing time is therefore required for the fired poll to have run
+    before the state is asserted (the plain wait was the source of the CI
+    flake).
+    """
     entry = await setup_with_bluetooth(hass, monkeypatch)
     state = entry.runtime_data.monitor.states[SERIAL_NORMALIZED]
 
@@ -288,7 +296,7 @@ async def test_refresh_timer_fires_and_unload_cancels_it(
     async_fire_time_changed(
         hass, dt_util.utcnow() + RSSI_REFRESH_INTERVAL + timedelta(seconds=1)
     )
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert state.rssi == -80
 
     # after unload the timer is cancelled: the history no longer reaches us
@@ -298,7 +306,7 @@ async def test_refresh_timer_fires_and_unload_cancels_it(
     async_fire_time_changed(
         hass, dt_util.utcnow() + RSSI_REFRESH_INTERVAL + timedelta(seconds=1)
     )
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert state.rssi == -80
 

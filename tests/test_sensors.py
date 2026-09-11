@@ -21,7 +21,10 @@ from tests.conftest import (
     make_service_info,
     setup_entry,
 )
-from custom_components.danalock_ble.binary_sensor import DanalockLockStateBinarySensor
+from custom_components.danalock_ble.binary_sensor import (
+    DanalockLockStateBinarySensor,
+    DanalockStatusBinarySensor,
+)
 from custom_components.danalock_ble.sensor import (
     DanalockBatteryLevelSensor,
     DanalockSignalStrengthSensor,
@@ -463,3 +466,20 @@ async def test_key_valid_until_follows_refreshed_key(
         entity_state(hass, entry, f"{SERIAL_NORMALIZED}_key_valid_until").state
         == "2100-06-01T00:00:00+00:00"
     )
+
+
+async def test_status_binary_sensor_without_report_is_unknown(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A status binary sensor without a report reports unknown (spec 0004 R3)."""
+    entry = await setup_with_bluetooth(hass, monkeypatch)
+    runtime = entry.runtime_data
+    state = runtime.monitor.states[SERIAL_NORMALIZED]
+
+    sensor = DanalockStatusBinarySensor(
+        entry, runtime.monitor, state, "jammed", "blocked"
+    )
+
+    assert sensor.is_on is None

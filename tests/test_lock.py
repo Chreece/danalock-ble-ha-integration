@@ -14,6 +14,7 @@ from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
 from custom_components.danalock_ble.const import DOMAIN
 from custom_components.danalock_ble.control import LockControlError
+from custom_components.danalock_ble.lock import DanalockLockEntity
 from custom_components.danalock_ble.select import DanalockSettingSelectEntity
 from tests.conftest import (
     SERIAL_NORMALIZED,
@@ -747,3 +748,41 @@ async def test_twist_assist_binary_sensor_follows_flag(
     )
     await hass.async_block_till_done()
     assert entity_state(hass, entry, f"{SERIAL_NORMALIZED}_twist_assist").state == "off"
+
+
+async def test_lock_entity_without_report_reports_unknown(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a decoded report the lock reports unknown (spec 0004 R1)."""
+    entry = await setup_with_bluetooth(hass, monkeypatch)
+    state = entry.runtime_data.monitor.states[SERIAL_NORMALIZED]
+    state.report = None
+    state.pending_locked = None
+
+    entity = DanalockLockEntity(entry, entry.runtime_data.monitor, state, None)
+
+    assert entity.is_locked is None
+    assert entity.extra_state_attributes is None
+
+
+async def test_select_value_for_rejects_unknown_option(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unknown option has no preset value and is rejected (spec 0010 R3).
+
+    Spec 0022 changed `_value_for` to raise `ServiceValidationError` instead
+    of a bare `ValueError`; after the spec-0025 rebase the expectation is
+    tightened to the service-validation exception alone.
+    """
+    entry = await setup_with_bluetooth(hass, monkeypatch)
+    state = entry.runtime_data.monitor.states[SERIAL_NORMALIZED]
+    entity = DanalockSettingSelectEntity(
+        entry, entry.runtime_data.monitor, state, None, "auto_lock"
+    )
+
+    with pytest.raises(ServiceValidationError):
+        entity._value_for("bogus")

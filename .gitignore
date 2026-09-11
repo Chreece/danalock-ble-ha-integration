@@ -11,6 +11,7 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .coverage
+coverage.json
 htmlcov/
 
 # Local secrets (never commit)

@@ -350,9 +350,22 @@ Planned work — not implemented yet, no timeline or version promised:
 - Test-driven development: tests live in `tests/` and run with
   `pytest -m "not live"`; hardware-dependent tests carry the `live` marker
   and are run manually only.
+- Coverage is enabled with branch coverage (`.coveragerc`); every integration
+  module must stay strictly above 95%. Reproduce the CI gate locally:
+
+  ```bash
+  pytest -m "not live" --cov=custom_components/danalock_ble \
+    --cov-report=term-missing --cov-fail-under=95
+  coverage json -o coverage.json
+  python scripts/check_module_coverage.py coverage.json --min 95
+  ```
+
+  The first command enforces the global floor, the per-module script fails if
+  any single module is at or below 95%.
 - Contribution rules and the review gate are described in
   [`AGENTS.md`](AGENTS.md).
-- CI runs `hassfest` and `hacs/action` on every push and pull request — see
+- CI runs `hassfest`, `hacs/action`, and the test/coverage job on every push
+  and pull request — see
   [`.github/workflows/validate.yml`](.github/workflows/validate.yml).
 
 ## Related projects

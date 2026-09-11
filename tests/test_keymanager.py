@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -550,3 +551,32 @@ def test_default_options_are_the_documented_hours() -> None:
     """The defaults match spec 0010 R5 (12 h period, 6 h jitter)."""
     assert DEFAULT_REFRESH_PERIOD_HOURS == 12
     assert DEFAULT_REFRESH_JITTER_HOURS == 6
+
+
+async def test_run_cycle_tolerates_refresh_failure(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    managers_to_stop: list[DanalockKeyManager],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failing background refresh is logged and does not re-arm
+    (spec 0007 R10). A manager without an active period is used so the
+    cycle cannot schedule itself again after the exception."""
+    caplog.set_level(logging.WARNING)
+    entry = make_entry(hass)
+    client = StubClient({SERIAL_NORMALIZED: make_device_key()})
+    manager = DanalockKeyManager(
+        hass, entry, client, {SERIAL_NORMALIZED: make_device_key()}
+    )
+    managers_to_stop.append(manager)
+
+    async def _boom() -> None:
+        raise RuntimeError("shutdown race")
+
+    monkeypatch.setattr(manager, "refresh_all", _boom)
+
+    await manager._run_cycle(dt_util.now())
+
+    assert "background key refresh aborted" in caplog.text
+    assert manager._cancel_timer is None
+    assert client.calls == []

@@ -1,0 +1,10 @@
+[run]
+branch = True
+source = custom_components/danalock_ble
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    if sys.version_info
