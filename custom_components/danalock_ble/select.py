@@ -89,6 +89,9 @@ _PENDING_READS: dict[str, asyncio.Task[None]] = {}
 
 LOGGER = logging.getLogger(__name__)
 
+# Outbound BLE settings write plus read-back against one device; serialize.
+PARALLEL_UPDATES = 1
+
 
 async def _async_read_settings(
     control: DanalockControl, state: DanalockDeviceState

@@ -22,6 +22,9 @@ from . import DanalockRuntimeData
 from .entity import DanalockEntity
 from .keymanager import DanalockKeyManager
 
+# Read-only state pushed by the shared broadcast monitor; no outbound action.
+PARALLEL_UPDATES = 0
+
 
 def _rssi_to_percent(rssi: int) -> int:
     """RSSI→percent mapping with clamping (spec 0002 R2)."""

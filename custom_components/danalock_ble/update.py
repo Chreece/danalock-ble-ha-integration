@@ -79,6 +79,9 @@ async def _extract_targets(hass: HomeAssistant, call: ServiceCall) -> set[str]:
 FIRMWARE_POLL_INTERVAL = timedelta(hours=24)
 FIRMWARE_RETRY_INTERVAL = timedelta(minutes=15)
 
+# Outbound cloud/BLE firmware checks are not centralized; serialize them.
+PARALLEL_UPDATES = 1
+
 ATTR_FIRMWARE_IDENTIFIER = "firmware_identifier"
 ATTR_HARDWARE_VERSION = "hardware_version"
 ATTR_MATURITY = "maturity"

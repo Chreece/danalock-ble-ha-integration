@@ -18,6 +18,9 @@ from custom_components.danalock_ble.broadcast import DanalockBroadcastMonitor, D
 from . import DanalockRuntimeData
 from .entity import DanalockEntity
 
+# Read-only state pushed by the shared broadcast monitor; no outbound action.
+PARALLEL_UPDATES = 0
+
 
 class DanalockLockStateBinarySensor(DanalockEntity, BinarySensorEntity):
     """Lock state from the advertisement lock flags (spec 0002 R2).

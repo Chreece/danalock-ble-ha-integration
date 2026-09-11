@@ -23,6 +23,9 @@ BROADCAST_VERSION = FORMAT_VERSION_STATE
 
 LOGGER = logging.getLogger(__name__)
 
+# Outbound BLE lock/unlock against one device; serialize one session at a time.
+PARALLEL_UPDATES = 1
+
 
 class DanalockLockEntity(DanalockEntity, LockEntity):
     """The lock of a danalock device (spec 0004 R1, control per spec 0006).
