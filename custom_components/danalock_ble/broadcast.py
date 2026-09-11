@@ -109,6 +109,8 @@ class DanalockBroadcastMonitor:
             serial: [] for serial in keys
         }
         self._notified: dict[str, bool] = {serial: False for serial in keys}
+        self._unavailable: dict[str, bool] = {serial: False for serial in keys}
+        self._monitor_started_at: float | None = None
         self._cancel_callback: CALLBACK_TYPE | None = None
         self._cancel_stale_timer: CALLBACK_TYPE | None = None
         self._cancel_refresh_timer: CALLBACK_TYPE | None = None
@@ -127,6 +129,8 @@ class DanalockBroadcastMonitor:
             LOGGER.warning(
                 "bluetooth is not available; danalock advertisement monitoring is disabled"
             )
+        else:
+            self._monitor_started_at = time.monotonic()
         self._cancel_stale_timer = async_track_time_interval(
             self._hass, self._check_stale, STALE_CHECK_INTERVAL
         )
@@ -210,6 +214,7 @@ class DanalockBroadcastMonitor:
         state.last_seen = time.monotonic()
         state.address = service_info.address
         state.last_info = service_info
+        self._sync_availability(serial)
         if report_changed or rssi_changed or was_stale:
             self._notified[serial] = True
             self._notify(serial)
@@ -253,15 +258,48 @@ class DanalockBroadcastMonitor:
             state.last_info = info
             state.rssi = info.rssi
             state.last_seen = time.monotonic()
+            self._sync_availability(state.serial)
             if rssi_changed or was_stale:
                 self._notify(state.serial)
 
     def _check_stale(self, now: object = None) -> None:
         """Write entities that just went stale (spec 0003 R3)."""
         for serial, state in self.states.items():
+            self._sync_availability(serial)
             if self._notified[serial] and not state.is_fresh:
                 self._notified[serial] = False
                 self._notify(serial)
+
+    def _sync_availability(self, serial: str) -> None:
+        """Log exactly one info message per availability transition (spec 0023).
+
+        A device that had been seen is logged unavailable once the stale
+        check observes it is no longer fresh; a device never seen is logged
+        once after the broadcast timeout since the monitor started (a fresh
+        monitor start must not produce a false transition). Recovery is
+        logged once when freshness returns and a prior unavailability was
+        logged. The per-device flag keeps repeated stale checks and
+        repeated advertisements from spamming the log.
+        """
+        state = self.states[serial]
+        if state.is_fresh:
+            if self._unavailable[serial]:
+                self._unavailable[serial] = False
+                LOGGER.info("danalock device %s is back online", serial)
+            return
+        if self._unavailable[serial]:
+            return
+        if state.last_seen is None and (
+            self._monitor_started_at is None
+            or time.monotonic() - self._monitor_started_at < BROADCAST_TIMEOUT_SECONDS
+        ):
+            return
+        self._unavailable[serial] = True
+        LOGGER.info(
+            "danalock device %s is unavailable: no advertisement within %.0f seconds",
+            serial,
+            BROADCAST_TIMEOUT_SECONDS,
+        )
 
     def _notify(self, serial: str) -> None:
         """Write the entities of one device (loop-safe scheduling).

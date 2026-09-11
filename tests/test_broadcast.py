@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from datetime import timedelta
 
 import pytest
@@ -9,7 +11,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
-from custom_components.danalock_ble.const import RSSI_REFRESH_INTERVAL
+from custom_components.danalock_ble.const import (
+    BROADCAST_TIMEOUT_SECONDS,
+    RSSI_REFRESH_INTERVAL,
+)
 from pydanalock.ble import LockSettings
 from tests.conftest import (
     FOREIGN_BROADCAST_KEY,
@@ -567,3 +572,189 @@ async def test_apply_settings_fills_the_cache(
         "blocked_to_blocked": 1,
     }
     assert state.settings_known() is True
+
+
+# --- availability transition logs (spec 0023) ---------------------------------
+
+
+@pytest.fixture(autouse=True)
+def capture_broadcast_info(caplog: pytest.LogCaptureFixture) -> None:
+    """Capture info records of the broadcast logger in every test."""
+    caplog.set_level(logging.INFO, logger="custom_components.danalock_ble.broadcast")
+
+
+def set_fake_time(monkeypatch: pytest.MonkeyPatch, offset: float) -> None:
+    """Shift the broadcast module's monotonic clock by ``offset`` seconds."""
+    real_monotonic = time.monotonic
+    monkeypatch.setattr(
+        "custom_components.danalock_ble.broadcast.time",
+        type(
+            "FakeTime",
+            (),
+            {"monotonic": staticmethod(lambda: real_monotonic() + offset)},
+        ),
+    )
+
+
+def broadcast_info(caplog: pytest.LogCaptureFixture, needle: str) -> list[str]:
+    """INFO messages of the broadcast logger containing ``needle``."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "custom_components.danalock_ble.broadcast"
+        and record.levelno == logging.INFO
+        and needle in record.getMessage()
+    ]
+
+
+async def test_unavailable_transition_logged_once(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A fresh→stale transition logs exactly one info message (R2/R3a/R5)."""
+    entry = await setup_with_bluetooth(hass, monkeypatch)
+
+    inject_advertisement(hass, make_service_info(make_broadcast_payload(counter=1)))
+    await hass.async_block_till_done()
+    assert broadcast_info(caplog, "is unavailable") == []
+
+    set_fake_time(monkeypatch, BROADCAST_TIMEOUT_SECONDS + 100)
+    entry.runtime_data.monitor._check_stale(None)
+    await hass.async_block_till_done()
+
+    messages = broadcast_info(caplog, "is unavailable")
+    assert len(messages) == 1
+    assert SERIAL_NORMALIZED in messages[0]
+
+    entry.runtime_data.monitor._check_stale(None)
+    await hass.async_block_till_done()
+    assert len(broadcast_info(caplog, "is unavailable")) == 1
+
+
+async def test_recovery_transition_logged_once(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A stale→fresh transition logs exactly one back-online message."""
+    entry = await setup_with_bluetooth(hass, monkeypatch)
+
+    inject_advertisement(hass, make_service_info(make_broadcast_payload(counter=1)))
+    await hass.async_block_till_done()
+
+    set_fake_time(monkeypatch, BROADCAST_TIMEOUT_SECONDS + 100)
+    entry.runtime_data.monitor._check_stale(None)
+    await hass.async_block_till_done()
+    assert len(broadcast_info(caplog, "is unavailable")) == 1
+
+    set_fake_time(monkeypatch, 0)
+    inject_advertisement(hass, make_service_info(make_broadcast_payload(counter=2)))
+    await hass.async_block_till_done()
+
+    online = broadcast_info(caplog, "back online")
+    assert len(online) == 1
+    assert SERIAL_NORMALIZED in online[0]
+
+    inject_advertisement(hass, make_service_info(make_broadcast_payload(counter=3)))
+    await hass.async_block_till_done()
+    assert len(broadcast_info(caplog, "back online")) == 1
+
+
+async def test_no_unavailable_log_before_first_advertisement_within_timeout(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A never-seen device is only logged after the timeout (R3b)."""
+    entry = await setup_with_bluetooth(hass, monkeypatch)
+
+    set_fake_time(monkeypatch, 60)
+    entry.runtime_data.monitor._check_stale(None)
+    await hass.async_block_till_done()
+    assert broadcast_info(caplog, "is unavailable") == []
+
+    set_fake_time(monkeypatch, BROADCAST_TIMEOUT_SECONDS + 100)
+    entry.runtime_data.monitor._check_stale(None)
+    await hass.async_block_till_done()
+    assert len(broadcast_info(caplog, "is unavailable")) == 1
+
+
+async def test_no_unavailable_log_when_bluetooth_disabled(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Without the Bluetooth callback there is no start time and no log (R7)."""
+    import custom_components.danalock_ble.broadcast as broadcast_module
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("BluetoothManager has not been set")
+
+    monkeypatch.setattr(broadcast_module, "async_register_callback", _raise)
+    entry = await setup_entry(hass, monkeypatch, CloudHandler())
+    await hass.async_block_till_done()
+
+    set_fake_time(monkeypatch, BROADCAST_TIMEOUT_SECONDS + 100)
+    entry.runtime_data.monitor._check_stale(None)
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.monitor.active is False
+    assert broadcast_info(caplog, "is unavailable") == []
+
+
+async def test_unavailable_log_once_per_device_with_many_entities(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """All entities share one device state: one transition, one log (R2)."""
+    entry = await setup_with_bluetooth(hass, monkeypatch)
+
+    inject_advertisement(hass, make_service_info(make_broadcast_payload(counter=1)))
+    await hass.async_block_till_done()
+
+    set_fake_time(monkeypatch, BROADCAST_TIMEOUT_SECONDS + 100)
+    entry.runtime_data.monitor._check_stale(None)
+    await hass.async_block_till_done()
+
+    assert len(broadcast_info(caplog, "is unavailable")) == 1
+
+
+async def test_recovery_via_history_poll_logged(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Recovery through the history poll logs one back-online message (R4)."""
+    entry = await setup_with_bluetooth(hass, monkeypatch)
+    monitor = entry.runtime_data.monitor
+    state = monitor.states[SERIAL_NORMALIZED]
+
+    inject_advertisement(
+        hass, make_service_info(make_broadcast_payload(counter=1), rssi=-70)
+    )
+    await hass.async_block_till_done()
+
+    set_fake_time(monkeypatch, BROADCAST_TIMEOUT_SECONDS + 100)
+    monitor._check_stale(None)
+    await hass.async_block_till_done()
+    assert len(broadcast_info(caplog, "is unavailable")) == 1
+
+    set_fake_time(monkeypatch, 0)
+    # same payload: the manager deduplicates the callback, history updates
+    inject_advertisement(
+        hass, make_service_info(make_broadcast_payload(counter=1), rssi=-80)
+    )
+    await hass.async_block_till_done()
+    monitor._refresh_states(None)
+    await hass.async_block_till_done()
+
+    online = broadcast_info(caplog, "back online")
+    assert len(online) == 1
+    assert state.rssi == -80
