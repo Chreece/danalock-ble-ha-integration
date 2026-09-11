@@ -18,7 +18,7 @@ Danalock cloud account.
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=buggy-shep&repository=danalock-ble-ha-integration&category=integration)
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=danalock_ble)
 
-<img src="custom_components/danalock_ble/brand/icon.png" width="120" alt="Danalock Bluetooth integration icon">
+<img src="assets/banner.png" width="800" alt="Danalock V3 lock bridging to Home Assistant over Bluetooth">
 
 </div>
 
