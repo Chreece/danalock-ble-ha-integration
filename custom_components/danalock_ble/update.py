@@ -19,6 +19,7 @@ from __future__ import annotations
 import inspect
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,7 @@ from homeassistant.components.update import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, ServiceCall, State, callback
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
@@ -81,6 +83,15 @@ FIRMWARE_RETRY_INTERVAL = timedelta(minutes=15)
 
 # Outbound cloud/BLE firmware checks are not centralized; serialize them.
 PARALLEL_UPDATES = 1
+
+
+@dataclass(frozen=True)
+class _CycleOutcome:
+    """The result of one firmware cycle (spec 0022 R2/R3)."""
+
+    next_delay: timedelta
+    failed: bool = False
+    error: Exception | None = None
 
 ATTR_FIRMWARE_IDENTIFIER = "firmware_identifier"
 ATTR_HARDWARE_VERSION = "hardware_version"
@@ -185,17 +196,24 @@ class DanalockFirmwareUpdateEntity(UpdateEntity, RestoreEntity):
         self.hass.async_create_task(self._async_cycle())
 
     async def async_update(self) -> None:
-        """Run one immediate cycle (spec 0010 R2).
+        """Run one immediate cycle (spec 0010 R2, 0022 R2/R3).
 
         The pending cycle timer is cancelled and re-armed after the cycle,
         so the 24-hour schedule restarts from this check. This is the
         delegate for a core force refresh (`homeassistant.update_entity`)
-        and for the `danalock_ble.check_firmware_updates` action.
+        and for the `danalock_ble.check_firmware_updates` action. A failed
+        forced cycle raises `HomeAssistantError`; the core force refresh
+        catches and logs it (`Entity.async_update_ha_state`), so its
+        behavior for the caller does not change.
         """
         if self._unsub_cycle is not None:
             self._unsub_cycle()
             self._unsub_cycle = None
-        await self._async_cycle()
+        outcome = await self._async_cycle()
+        if outcome.failed:
+            raise HomeAssistantError(
+                f"Firmware check failed for {self.entity_id}"
+            ) from outcome.error
 
     async def async_will_remove_from_hass(self) -> None:
         """Cancel the pending cycle."""
@@ -215,58 +233,71 @@ class DanalockFirmwareUpdateEntity(UpdateEntity, RestoreEntity):
         self._hardware_version = attributes.get(ATTR_HARDWARE_VERSION) or None
         self._maturity = attributes.get(ATTR_MATURITY) or None
 
-    async def _async_cycle(self, _now: datetime | None = None) -> None:
+    async def _async_cycle(self, _now: datetime | None = None) -> _CycleOutcome:
         """One cycle: /latest probe, BLE read on divergence, reschedule."""
         self._unsub_cycle = None
         if self.hass is None:
-            return  # the entity was removed while the timer was pending
+            # the entity was removed while the timer was pending
+            return _CycleOutcome(FIRMWARE_POLL_INTERVAL)
         if self._cycle_in_flight:
             # a forced or scheduled cycle is already running; it re-arms
             # the timer itself (spec 0010 R2: one chain, never stacked)
-            return
+            return _CycleOutcome(FIRMWARE_POLL_INTERVAL)
         self._cycle_in_flight = True
         try:
-            delay = await self._async_refresh()
+            outcome = await self._async_refresh()
             if self.hass is None:
-                return  # removed while the cycle was in flight
+                return _CycleOutcome(outcome.next_delay)  # removed in flight
             self.async_write_ha_state()
-            self._unsub_cycle = async_call_later(self.hass, delay, self._async_cycle)
+            self._unsub_cycle = async_call_later(
+                self.hass, outcome.next_delay, self._async_cycle
+            )
+            return outcome
         finally:
             self._cycle_in_flight = False
 
-    async def _async_refresh(self) -> timedelta:
-        """Refresh latest and (when needed) installed; return the next delay."""
+    async def _async_refresh(self) -> _CycleOutcome:
+        """Refresh latest and (when needed) installed; return the outcome."""
         try:
             latest = await self._client.latest_firmware(self._serial)
         except (DanalockCloudError, httpx.HTTPError) as err:
             LOGGER.debug("latest firmware lookup failed for %s: %s", self._serial, err)
-            return FIRMWARE_RETRY_INTERVAL
+            return _CycleOutcome(FIRMWARE_RETRY_INTERVAL, failed=True, error=err)
         except RuntimeError as err:
             # the entry was unloaded while this cycle was in flight and the
             # cloud client is closed already (shutdown race)
             LOGGER.debug("latest firmware lookup skipped for %s: %s", self._serial, err)
-            return FIRMWARE_RETRY_INTERVAL
+            return _CycleOutcome(FIRMWARE_RETRY_INTERVAL)
         self._attr_latest_version = latest.version
         self._maturity = latest.maturity
         if self._firmware_identifier is None:
             # the lock's own identifier wins once it has been read
             self._firmware_identifier = latest.firmware_identifier
         if not _versions_equal(self._attr_installed_version, latest.version):
-            await self._async_read_lock()
-        return FIRMWARE_POLL_INTERVAL
+            read_error = await self._async_read_lock()
+            if read_error is not None:
+                return _CycleOutcome(
+                    FIRMWARE_POLL_INTERVAL, failed=True, error=read_error
+                )
+        return _CycleOutcome(FIRMWARE_POLL_INTERVAL)
 
-    async def _async_read_lock(self) -> None:
-        """Read the installed version over BLE; failures keep the values."""
+    async def _async_read_lock(self) -> Exception | None:
+        """Read the installed version over BLE, keeping values on failure.
+
+        Returns the caught exception (so a forced check can surface it) or
+        ``None`` on success; scheduled cycles ignore the return value.
+        """
         try:
             info = await self._control.device_information()
-        except Exception as err:  # noqa: BLE001 - the cycle must never fail
+        except Exception as err:  # noqa: BLE001 - scheduled cycles stay best-effort
             LOGGER.debug(
                 "device information read failed for %s: %s", self._serial, err
             )
-            return
+            return err
         self._attr_installed_version = version_dot(info.firmware_version)
         self._firmware_identifier = info.firmware_identifier
         self._hardware_version = version_dot(info.hardware_version)
+        return None
 
 
 async def async_setup_entry(
@@ -295,21 +326,19 @@ def async_register_firmware_check_service(hass: HomeAssistant) -> None:
 
     async def _async_handle(call: ServiceCall) -> None:
         entity_ids = await _extract_targets(hass, call)
+        if not entity_ids:
+            return  # no target: nothing to check (spec 0022 R1)
         component: EntityComponent[UpdateEntity] | None = hass.data.get(DATA_COMPONENT)
         if component is None:
-            LOGGER.debug(
-                "check_firmware_updates skipped: no update entities are loaded"
-            )
-            return
+            raise ServiceValidationError("No update entities are loaded")
         for entity_id in entity_ids:
             entity = component.get_entity(entity_id)
+            if entity is None:
+                raise ServiceValidationError(f"Unknown entity {entity_id}")
             if not isinstance(entity, DanalockFirmwareUpdateEntity):
-                LOGGER.debug(
-                    "check_firmware_updates skipped: %s is not a danalock "
-                    "firmware entity",
-                    entity_id,
+                raise ServiceValidationError(
+                    f"{entity_id} is not a danalock firmware entity"
                 )
-                continue
             await entity.async_update()
 
     hass.services.async_register(DOMAIN, SERVICE_CHECK_FIRMWARE_UPDATES, _async_handle)

@@ -19,6 +19,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -145,7 +146,9 @@ class DanalockSettingSelectEntity(DanalockEntity, SelectEntity):
         for value, candidate in self._options:
             if candidate == option:
                 return value
-        raise ValueError(f"{option} is not a valid option for {self.entity_id}")
+        raise ServiceValidationError(
+            f"{option} is not a valid option for {self.entity_id}"
+        )
 
     def _log_unmapped_value(self) -> None:
         """Debug-log a device-reported value with no matching option."""
@@ -183,13 +186,10 @@ class DanalockSettingSelectEntity(DanalockEntity, SelectEntity):
         """Write the option and show the verified device value
         (spec 0010 R3)."""
         if self._control is None:
-            LOGGER.warning(
-                "Ignoring the %s option change for %s: no key is available for this device",
-                option,
-                self.entity_id,
+            raise HomeAssistantError(
+                f"Cannot select {option} for {self.entity_id}: "
+                "no key is available for this device"
             )
-            self.async_write_ha_state()
-            return
         value = self._value_for(option)
         write = getattr(self._control, SETTING_WRITES[self._setting])
         settings = await write(value)

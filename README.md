@@ -212,7 +212,10 @@ The integration exposes one action:
 ### `danalock_ble.check_firmware_updates`
 
 Checks the installed firmware of the targeted Danalock locks against the
-latest published version.
+latest published version. A failed check (the cloud probe or the lock read
+failed) raises `HomeAssistantError`; a target that is unknown or is not a
+Danalock firmware entity raises `ServiceValidationError`. An empty target
+is a no-op.
 
 ```yaml
 action: danalock_ble.check_firmware_updates
@@ -222,6 +225,10 @@ target:
 
 Calling the core `homeassistant.update_entity` action on a firmware entity
 also triggers an immediate check.
+
+The lock and select actions follow the same rule: a failed action (for
+example no key is available for the device) raises `HomeAssistantError`,
+and an invalid select option raises `ServiceValidationError`.
 
 ## Automation examples
 

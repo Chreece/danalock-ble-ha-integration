@@ -9,9 +9,10 @@ from typing import Any
 
 import httpx
 import pytest
-from homeassistant.components.update import DATA_COMPONENT
+from homeassistant.components.update import DATA_COMPONENT, UpdateEntity
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -657,28 +658,32 @@ async def test_check_firmware_updates_action_uses_the_modern_helper_form(
     assert hass.states.get(UPDATE_ENTITY_ID).state == "on"
 
 
-async def test_check_firmware_updates_action_ignores_foreign_and_empty_targets(
+class _ForeignUpdateEntity(UpdateEntity):
+    """A non-danalock update entity used to exercise target validation."""
+
+    _attr_should_poll = False
+    _attr_unique_id = "foreign_firmware"
+    _attr_name = "Foreign firmware"
+
+    async def async_update(self) -> None:
+        """The action must never call this entity."""
+
+
+async def test_check_firmware_updates_action_empty_target_is_a_noop(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Unknown, foreign, and empty targets are quiet no-ops (spec 0010 R3)."""
+    """An empty target stays a quiet no-op (spec 0022 R1)."""
     handler = CloudHandler()
     stubs = await setup_firmware_entry(hass, monkeypatch, handler, make_info())
     stub = stubs[SERIAL_NORMALIZED]
     assert stub.calls == 1
 
-    await hass.services.async_call(
-        DOMAIN,
-        "check_firmware_updates",
-        {"entity_id": "update.some_other_firmware"},
-        blocking=True,
-    )
     await hass.services.async_call(DOMAIN, "check_firmware_updates", blocking=True)
     await hass.async_block_till_done()
 
     assert stub.calls == 1
-    assert "not a danalock firmware entity" in caplog.text
     update_records = [
         record for record in caplog.records if record.name == UPDATE_LOGGER.name
     ]
@@ -687,35 +692,122 @@ async def test_check_firmware_updates_action_ignores_foreign_and_empty_targets(
     ]
 
 
-async def test_check_firmware_updates_action_without_update_platform_is_quiet(
+async def test_check_firmware_updates_action_rejects_unknown_target(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Without the update platform component the action is a quiet no-op
-    (spec 0010 R3)."""
+    """An unknown entity_id raises ServiceValidationError (spec 0022 R1)."""
+    handler = CloudHandler()
+    stubs = await setup_firmware_entry(hass, monkeypatch, handler, make_info())
+    stub = stubs[SERIAL_NORMALIZED]
+    assert stub.calls == 1
+
+    with pytest.raises(ServiceValidationError, match="Unknown entity"):
+        await hass.services.async_call(
+            DOMAIN,
+            "check_firmware_updates",
+            {"entity_id": "update.some_other_firmware"},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+    assert stub.calls == 1
+
+
+async def test_check_firmware_updates_action_rejects_foreign_target(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A registered non-danalock update entity raises ServiceValidationError
+    (spec 0022 R1)."""
+    handler = CloudHandler()
+    stubs = await setup_firmware_entry(hass, monkeypatch, handler, make_info())
+    stub = stubs[SERIAL_NORMALIZED]
+    component = hass.data[DATA_COMPONENT]
+    await component.async_add_entities([_ForeignUpdateEntity()])
+    await hass.async_block_till_done()
+    assert stub.calls == 1
+
+    with pytest.raises(ServiceValidationError, match="not a danalock firmware entity"):
+        await hass.services.async_call(
+            DOMAIN,
+            "check_firmware_updates",
+            {"entity_id": "update.foreign_firmware"},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+    assert stub.calls == 1
+
+
+async def test_check_firmware_updates_action_without_update_platform_raises(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-empty target without the update component raises
+    ServiceValidationError (spec 0022 R1)."""
     handler = CloudHandler()
     stubs = await setup_firmware_entry(hass, monkeypatch, handler, make_info())
     component = hass.data.pop(DATA_COMPONENT)
     try:
+        with pytest.raises(
+            ServiceValidationError, match="No update entities are loaded"
+        ):
+            await hass.services.async_call(
+                DOMAIN,
+                "check_firmware_updates",
+                {"entity_id": UPDATE_ENTITY_ID},
+                blocking=True,
+            )
+    finally:
+        hass.data[DATA_COMPONENT] = component
+    await hass.async_block_till_done()
+    assert stubs[SERIAL_NORMALIZED].calls == 1
+
+
+async def test_check_firmware_updates_action_forced_probe_failure_raises(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed forced cloud probe raises HomeAssistantError (spec 0022 R2)."""
+    handler = CloudHandler()
+    stubs = await setup_firmware_entry(hass, monkeypatch, handler, make_info())
+    handler.firmware_status = 500
+
+    with pytest.raises(HomeAssistantError, match="Firmware check failed"):
         await hass.services.async_call(
             DOMAIN,
             "check_firmware_updates",
             {"entity_id": UPDATE_ENTITY_ID},
             blocking=True,
         )
-    finally:
-        hass.data[DATA_COMPONENT] = component
     await hass.async_block_till_done()
-
     assert stubs[SERIAL_NORMALIZED].calls == 1
-    assert "no update entities are loaded" in caplog.text
-    update_records = [
-        record for record in caplog.records if record.name == UPDATE_LOGGER.name
-    ]
-    assert not [
-        record for record in update_records if record.levelno >= logging.WARNING
-    ]
+
+
+async def test_check_firmware_updates_action_forced_ble_failure_raises(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed forced BLE read raises HomeAssistantError (spec 0022 R2)."""
+    handler = CloudHandler()
+    stubs = await setup_firmware_entry(
+        hass,
+        monkeypatch,
+        handler,
+        make_info(),
+        effect=HomeAssistantError("no address"),
+    )
+    stub = stubs[SERIAL_NORMALIZED]
+    assert stub.calls == 1  # the bootstrap read failed silently
+
+    with pytest.raises(HomeAssistantError, match="Firmware check failed"):
+        await hass.services.async_call(
+            DOMAIN,
+            "check_firmware_updates",
+            {"entity_id": UPDATE_ENTITY_ID},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+    assert stub.calls == 2
 
 
 async def test_concurrent_forced_cycles_run_one_chain(

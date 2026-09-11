@@ -9,6 +9,7 @@ from homeassistant.components.lock import LockEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from custom_components.danalock_ble.broadcast import DanalockBroadcastMonitor, DanalockDeviceState
@@ -80,13 +81,10 @@ class DanalockLockEntity(DanalockEntity, LockEntity):
     async def _operate(self, target_locked: bool) -> None:
         command = "lock" if target_locked else "unlock"
         if self._control is None:
-            LOGGER.warning(
-                "Ignoring the %s command for %s: no key is available for this device",
-                command,
-                self.entity_id,
+            raise HomeAssistantError(
+                f"Cannot {command} {self.entity_id}: "
+                "no key is available for this device"
             )
-            self.async_write_ha_state()
-            return
         self._attr_is_locking = target_locked
         self._attr_is_unlocking = not target_locked
         self.async_write_ha_state()

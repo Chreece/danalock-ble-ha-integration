@@ -8,12 +8,13 @@ import logging
 import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
 from custom_components.danalock_ble.const import DOMAIN
 from custom_components.danalock_ble.control import LockControlError
+from custom_components.danalock_ble.select import DanalockSettingSelectEntity
 from tests.conftest import (
     SERIAL_NORMALIZED,
     CloudHandler,
@@ -349,13 +350,12 @@ async def test_lock_state_binary_sensor_ignores_pending(
     assert entity_state(hass, entry, f"{SERIAL_NORMALIZED}_lock_state").state == "off"
 
 
-async def test_lock_entity_without_control_is_noop(
+async def test_lock_entity_without_control_raises(
     enable_bluetooth: None,
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A device without a control keeps the no-op behavior (spec 0006 R7)."""
+    """A device without a control raises HomeAssistantError (spec 0022 R4)."""
     import custom_components.danalock_ble
 
     monkeypatch.setattr(
@@ -367,11 +367,13 @@ async def test_lock_entity_without_control_is_noop(
     )
     await hass.async_block_till_done()
 
-    await hass.services.async_call("lock", "unlock", {"entity_id": LOCK_ID}, blocking=True)
+    with pytest.raises(HomeAssistantError, match="no key"):
+        await hass.services.async_call(
+            "lock", "unlock", {"entity_id": LOCK_ID}, blocking=True
+        )
     await hass.async_block_till_done()
 
     assert hass.states.get(LOCK_ID).state == "locked"
-    assert "no key is available" in caplog.text
 
 
 async def test_status_binary_sensors_follow_flags(
@@ -620,6 +622,31 @@ async def test_select_option_unsupported_argument_maps_message(
         )
 
 
+async def test_select_invalid_option_is_service_validation_error(
+    enable_bluetooth: None,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unknown option maps to ServiceValidationError, not a bare
+    ValueError (spec 0022 R5)."""
+    _, stub = await setup_with_enabled_selects(hass, monkeypatch)
+
+    inject_advertisement(
+        hass, make_service_info(make_broadcast_payload(counter=1, lock_flags=0b00001))
+    )
+    await hass.async_block_till_done()
+
+    entity = hass.data["select"].get_entity(
+        f"select.danalock_ble_{SERIAL_NORMALIZED}_auto_lock"
+    )
+    assert isinstance(entity, DanalockSettingSelectEntity)
+    with pytest.raises(ServiceValidationError, match="not a valid option"):
+        entity._value_for("not_an_option")
+    with pytest.raises(ServiceValidationError, match="not a valid option"):
+        await entity.async_select_option("not_an_option")
+    assert stub.writes == []
+
+
 async def test_nonpreset_value_reports_unknown_and_logs(
     enable_bluetooth: None,
     hass: HomeAssistant,
@@ -645,13 +672,12 @@ async def test_nonpreset_value_reports_unknown_and_logs(
     assert "non-preset value" in caplog.text
 
 
-async def test_select_without_control_is_noop(
+async def test_select_without_control_raises(
     enable_bluetooth: None,
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A device without a control keeps the no-op behavior (spec 0010 R6).
+    """A device without a control raises HomeAssistantError (spec 0022 R5).
 
     The enabled registry entries are pre-created so the first setup adds
     the selects without a reload (a None control must not survive an
@@ -679,19 +705,19 @@ async def test_select_without_control_is_noop(
     await hass.async_block_till_done()
     assert entity_state(hass, entry, f"{SERIAL_NORMALIZED}_auto_lock").state == "unknown"
 
-    await hass.services.async_call(
-        "select",
-        "select_option",
-        {
-            "entity_id": f"select.danalock_ble_{SERIAL_NORMALIZED}_auto_lock",
-            "option": "300_s",
-        },
-        blocking=True,
-    )
+    with pytest.raises(HomeAssistantError, match="no key"):
+        await hass.services.async_call(
+            "select",
+            "select_option",
+            {
+                "entity_id": f"select.danalock_ble_{SERIAL_NORMALIZED}_auto_lock",
+                "option": "300_s",
+            },
+            blocking=True,
+        )
     await hass.async_block_till_done()
 
     assert entity_state(hass, entry, f"{SERIAL_NORMALIZED}_auto_lock").state == "unknown"
-    assert "no key is available" in caplog.text
 
 
 async def test_twist_assist_binary_sensor_follows_flag(
