@@ -59,6 +59,14 @@ def test_english_translation_is_valid() -> None:
     assert _load(ENGLISH_PATH)
 
 
+@pytest.mark.parametrize("step", ["user", "reauth_confirm", "reconfigure"])
+def test_login_steps_describe_credentials(step: str) -> None:
+    """Each login step gives per-field context (spec 0021 R1)."""
+    descriptions = _load(ENGLISH_PATH)["config"]["step"][step]["data_description"]
+    assert descriptions["username"].strip()
+    assert descriptions["password"].strip()
+
+
 def test_russian_translation_exists() -> None:
     """The Russian runtime translation is shipped (spec 0011 R3)."""
     assert RUSSIAN_PATH.is_file()

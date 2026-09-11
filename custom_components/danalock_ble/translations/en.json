@@ -17,6 +17,10 @@
           "password": "Password",
           "username": "Username"
         },
+        "data_description": {
+          "password": "Re-enter the account password to renew the cloud session. The password is never stored.",
+          "username": "The email address of the account this integration is set up for."
+        },
         "description": "Unofficial, community-built integration. Not affiliated with, endorsed by, or sponsored by Danalock AS or Poly-Control. Use at your own risk; only control locks you own.",
         "title": "Re-authenticate Danalock"
       },
@@ -25,6 +29,10 @@
           "password": "Password",
           "username": "Username"
         },
+        "data_description": {
+          "password": "The account password used once to validate the new login. The password is never stored.",
+          "username": "The email address of the Danalock cloud account; changing it moves the entry to that account."
+        },
         "description": "Unofficial, community-built integration. Not affiliated with, endorsed by, or sponsored by Danalock AS or Poly-Control. Use at your own risk; only control locks you own.",
         "title": "Reconfigure Danalock"
       },
@@ -32,6 +40,10 @@
         "data": {
           "password": "Password",
           "username": "Username"
+        },
+        "data_description": {
+          "password": "Your Danalock cloud password. It is used once to obtain tokens and is never stored.",
+          "username": "The email address of your Danalock cloud account, as used in the Danalock app."
         },
         "description": "Unofficial, community-built integration. Not affiliated with, endorsed by, or sponsored by Danalock AS or Poly-Control. Use at your own risk; only control locks you own.",
         "title": "Log in to the Danalock cloud"

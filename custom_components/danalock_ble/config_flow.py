@@ -1,5 +1,5 @@
 """Config flow for the Danalock Bluetooth integration (specs 0001, 0007,
-0010).
+0010, 0021).
 
 The flow validates the cloud login and key retrieval before creating the
 entry. Entry identity is the username, normalized with `strip().lower()`
@@ -18,6 +18,11 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from custom_components.danalock_ble.const import (
     CONF_PASSWORD,
@@ -44,10 +49,17 @@ from custom_components.danalock_ble.storage import DanalockTokenStorage
 
 from . import new_cloud_client
 
+USERNAME_SELECTOR = TextSelector(
+    TextSelectorConfig(type=TextSelectorType.EMAIL, autocomplete="username")
+)
+PASSWORD_SELECTOR = TextSelector(
+    TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password")
+)
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_USERNAME): str,
-        vol.Required(CONF_PASSWORD): str,
+        vol.Required(CONF_USERNAME): USERNAME_SELECTOR,
+        vol.Required(CONF_PASSWORD): PASSWORD_SELECTOR,
     }
 )
 
@@ -146,8 +158,8 @@ class DanalockConfigFlow(ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(
                     CONF_USERNAME, default=entry.data.get(CONF_USERNAME, "")
-                ): str,
-                vol.Required(CONF_PASSWORD): str,
+                ): USERNAME_SELECTOR,
+                vol.Required(CONF_PASSWORD): PASSWORD_SELECTOR,
             }
         )
         errors: dict[str, str] = {}

@@ -11,10 +11,12 @@ from typing import Any
 
 import httpx
 import pytest
+import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from homeassistant.helpers.selector import TextSelector, TextSelectorType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.danalock_ble.const import (
@@ -57,6 +59,51 @@ def single_entry(hass: HomeAssistant) -> MockConfigEntry:
     entries = hass.config_entries.async_entries(DOMAIN)
     assert len(entries) == 1
     return entries[0]
+
+
+def field_selector(schema: vol.Schema, key: str) -> TextSelector:
+    """The `TextSelector` bound to a field of a voluptuous form schema."""
+    for marker, validator in schema.schema.items():
+        if getattr(marker, "schema", None) == key:
+            assert isinstance(validator, TextSelector)
+            return validator
+    raise AssertionError(f"{key!r} is not present in the schema")
+
+
+def assert_credential_selectors(schema: vol.Schema) -> None:
+    """Username is an email field and password is masked (spec 0021 R2)."""
+    username = field_selector(schema, "username")
+    password = field_selector(schema, "password")
+    assert username.config["type"] == TextSelectorType.EMAIL
+    assert username.config["autocomplete"] == "username"
+    assert password.config["type"] == TextSelectorType.PASSWORD
+    assert password.config["autocomplete"] == "current-password"
+
+
+async def test_user_form_uses_credential_selectors(hass: HomeAssistant) -> None:
+    """The initial login form chooses the right credential selectors."""
+    result = await start_user_flow(hass)
+
+    assert result["type"] == FlowResultType.FORM
+    assert_credential_selectors(result["data_schema"])
+
+
+async def test_reauth_and_reconfigure_forms_use_credential_selectors(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reauth and reconfigure reuse the credential selectors (spec 0021 R2)."""
+    handler = CloudHandler()
+    entry = make_wired_entry(hass, monkeypatch, handler)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    reauth = await entry.start_reauth_flow(hass)
+    assert reauth["type"] == FlowResultType.FORM
+    assert_credential_selectors(reauth["data_schema"])
+
+    reconfigure = await entry.start_reconfigure_flow(hass)
+    assert reconfigure["type"] == FlowResultType.FORM
+    assert_credential_selectors(reconfigure["data_schema"])
 
 
 def make_wired_entry(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, handler) -> MockConfigEntry:
