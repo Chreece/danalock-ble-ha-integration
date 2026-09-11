@@ -1,0 +1,26 @@
+{
+  "domain": "danalock_ble",
+  "name": "Danalock Bluetooth",
+  "after_dependencies": [
+    "bluetooth"
+  ],
+  "bluetooth": [
+    {
+      "manufacturer_id": 456,
+      "connectable": false
+    }
+  ],
+  "codeowners": [
+    "@buggy-shep"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/buggy-shep/danalock-ble-ha-integration",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/buggy-shep/danalock-ble-ha-integration/issues",
+  "requirements": [
+    "pydanalock-ble==0.9.0",
+    "pydanalock-cloud==0.5.1"
+  ],
+  "version": "0.8.0"
+}

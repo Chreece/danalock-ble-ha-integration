@@ -1,0 +1,10 @@
+# Test tooling (pinned; pytest-homeassistant-custom-component carries the
+# matching homeassistant dev version).
+pytest==8.3.4
+pytest-homeassistant-custom-component==0.13.205
+pyserial==3.5
+pyudev==0.24.1
+
+# Runtime dependencies published on PyPI (also pinned in manifest.json).
+pydanalock-ble==0.9.0
+pydanalock-cloud==0.5.1

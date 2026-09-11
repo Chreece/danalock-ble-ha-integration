@@ -1,0 +1,26 @@
+{
+  "device": {
+    "device_type": "danalockv3",
+    "name": "Fixture Lock",
+    "serial_number": "00:11:22:33:44:55",
+    "timezone": "UTC"
+  },
+  "blob": "AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4/wYNFBsiKTA3PkVMU1phaG92fYSLkpmgp661vMPK0djf5u30+wIJEBceJSwzOkFIT1ZdZGtyeYCHjpWco6qxuL/GzdTb4unw",
+  "broadcast_key": "AwoRGB8mLTQ7QklQV15lbA==",
+  "metadata": {
+    "valid_from": "2026-01-01T00:00:00+00:00",
+    "valid_to": "2099-01-01T00:00:00+00:00",
+    "permissions": [
+      {
+        "id": "0",
+        "name": "owner",
+        "description": "synthetic owner permission"
+      },
+      {
+        "id": "1",
+        "name": "guest",
+        "description": "synthetic guest permission"
+      }
+    ]
+  }
+}

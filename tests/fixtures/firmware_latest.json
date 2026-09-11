@@ -1,0 +1,6 @@
+{
+  "firmware_identifier": "DanalockV3_101-025_D1_1.2.3_20990101120000",
+  "maturity": "production",
+  "url": "https://s3.example.com/danalock-v3/app.bin?X-Amz-Expires=120&X-Amz-Signature=synthetic",
+  "version": "1.2.3"
+}

@@ -1,0 +1,150 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "reauth_successful": "Re-authentication was successful.",
+      "reconfigure_successful": "Configuration was updated."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the Danalock cloud.",
+      "invalid_auth": "Invalid username or password.",
+      "no_keys": "No devices with keys were found on this account.",
+      "unknown": "Unexpected error."
+    },
+    "step": {
+      "reauth_confirm": {
+        "data": {
+          "password": "Password",
+          "username": "Username"
+        },
+        "description": "Unofficial, community-built integration. Not affiliated with, endorsed by, or sponsored by Danalock AS or Poly-Control. Use at your own risk; only control locks you own.",
+        "title": "Re-authenticate Danalock"
+      },
+      "reconfigure": {
+        "data": {
+          "password": "Password",
+          "username": "Username"
+        },
+        "description": "Unofficial, community-built integration. Not affiliated with, endorsed by, or sponsored by Danalock AS or Poly-Control. Use at your own risk; only control locks you own.",
+        "title": "Reconfigure Danalock"
+      },
+      "user": {
+        "data": {
+          "password": "Password",
+          "username": "Username"
+        },
+        "description": "Unofficial, community-built integration. Not affiliated with, endorsed by, or sponsored by Danalock AS or Poly-Control. Use at your own risk; only control locks you own.",
+        "title": "Log in to the Danalock cloud"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Key refresh",
+        "data": {
+          "refresh_jitter_hours": "Random jitter added to each refresh interval (hours)",
+          "refresh_period_hours": "Interval between background key refreshes (hours)"
+        },
+        "data_description": {
+          "refresh_jitter_hours": "Each refresh happens after the interval plus a random delay of up to this many hours; 0 disables the jitter.",
+          "refresh_period_hours": "The keys of all devices are refreshed from the cloud this often; 0 disables the background refresh."
+        }
+      }
+    }
+  },
+  "services": {
+    "check_firmware_updates": {
+      "name": "Check firmware updates",
+      "description": "Checks the installed firmware of the targeted Danalock locks against the latest published version."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "auto_calibrated": {
+        "name": "Auto calibrated"
+      },
+      "jammed": {
+        "name": "Jammed"
+      },
+      "lock_state": {
+        "name": "Lock state"
+      },
+      "point_calibrated": {
+        "name": "Point calibrated"
+      },
+      "twist_assist": {
+        "name": "Twist assist"
+      }
+    },
+    "lock": {
+      "lock": {
+        "name": "Lock"
+      }
+    },
+    "select": {
+      "auto_lock": {
+        "name": "Auto lock",
+        "state": {
+          "off": "Off",
+          "5_s": "5 s",
+          "10_s": "10 s",
+          "15_s": "15 s",
+          "30_s": "30 s",
+          "45_s": "45 s",
+          "60_s": "60 s",
+          "180_s": "180 s",
+          "300_s": "300 s",
+          "600_s": "600 s",
+          "900_s": "900 s"
+        }
+      },
+      "brake_and_go_back": {
+        "name": "Brake and go back",
+        "state": {
+          "off": "Off",
+          "3_s": "3 s",
+          "5_s": "5 s",
+          "10_s": "10 s",
+          "15_s": "15 s",
+          "20_s": "20 s",
+          "25_s": "25 s",
+          "30_s": "30 s",
+          "45_s": "45 s",
+          "50_s": "50 s",
+          "60_s": "60 s"
+        }
+      },
+      "blocked_to_blocked": {
+        "name": "Blocked to blocked",
+        "state": {
+          "off": "Off",
+          "one": "One",
+          "two": "Two"
+        }
+      }
+    },
+    "sensor": {
+      "battery_level": {
+        "name": "Battery level"
+      },
+      "key_valid_until": {
+        "name": "Key valid until"
+      },
+      "rssi": {
+        "name": "RSSI"
+      },
+      "signal_strength": {
+        "name": "Signal strength"
+      },
+      "update_counter": {
+        "name": "Update counter"
+      }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
+      }
+    }
+  }
+}

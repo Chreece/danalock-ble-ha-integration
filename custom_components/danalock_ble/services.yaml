@@ -1,0 +1,7 @@
+# Describes the danalock actions (spec 0010). Names and descriptions come
+# from translations/en.json.
+check_firmware_updates:
+  target:
+    entity:
+      integration: danalock_ble
+      domain: update
