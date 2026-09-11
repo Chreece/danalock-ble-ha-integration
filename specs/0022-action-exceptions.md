@@ -1,7 +1,6 @@
 # 0022 — Silver `action-exceptions`: validate targets, raise typed action errors
 
-- **Status:** approved (owner decision recorded in the group conversation,
-  2026-09-11: close the silver `action-exceptions` rule)
+- **Status:** implemented
 - **Scope:** the `danalock_ble.check_firmware_updates` action
   (`update.py`), the lock platform action (`lock.py`), and the select
   platform action (`select.py`), plus tests, README, and the manifest

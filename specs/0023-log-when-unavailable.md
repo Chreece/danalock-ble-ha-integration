@@ -1,7 +1,6 @@
 # 0023 — Silver `log-when-unavailable`: advertisement availability transitions
 
-- **Status:** approved (owner decision recorded in the group conversation,
-  2026-09-11: close the silver `log-when-unavailable` rule)
+- **Status:** implemented
 - **Scope:** `custom_components/danalock_ble/broadcast.py` (transition
   logging) and its tests, plus the `manifest.json` version. No change to the
   availability model, entity state, or cloud-derived paths.

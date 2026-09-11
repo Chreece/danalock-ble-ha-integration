@@ -1,7 +1,6 @@
 # 0024 — Silver `parallel-updates`: explicit per-platform limits
 
-- **Status:** approved (owner decision recorded in the group conversation,
-  2026-09-11: close the Silver `parallel-updates` rule)
+- **Status:** implemented
 - **Scope:** module-level `PARALLEL_UPDATES` in the five entity platform modules,
   a new test module, and the manifest version. No setup/unload, entity,
   translation, or dependency changes.

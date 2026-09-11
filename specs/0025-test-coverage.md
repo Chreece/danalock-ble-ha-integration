@@ -1,8 +1,6 @@
 # 0025 — Silver `test-coverage`: CI gate and above 95% per-module coverage
 
-- **Status:** approved (owner decision recorded in the group conversation,
-  2026-09-11: enforce the Silver rule strictly, add coverage to CI, close the
-  `lock.py` gap; no manifest bump and no release)
+- **Status:** implemented
 - **Scope:** CI (`.github/workflows/validate.yml`), test tooling
   (`.coveragerc`, `requirements_dev.txt`, `scripts/check_module_coverage.py`),
   tests under `tests/`, `.gitignore`, and a README testing note. No runtime
