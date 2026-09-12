@@ -8,5 +8,5 @@ pyserial==3.5
 pyudev==0.24.1
 
 # Runtime dependencies published on PyPI (also pinned in manifest.json).
-pydanalock-ble==0.9.0
+pydanalock-ble==0.10.0
 pydanalock-cloud==0.5.1

@@ -45,6 +45,7 @@ from tests.conftest import (
 from tests.test_control import FakeLock, install_fake_lock
 from tests.test_sensors import (
     BINARY_SENSOR_SUFFIXES,
+    BUTTON_SUFFIXES,
     LOCK_SUFFIXES,
     SELECT_SUFFIXES,
     SENSOR_SUFFIXES,
@@ -229,6 +230,7 @@ async def test_unsupported_device_type_registered_but_skipped(
         + len(SENSOR_SUFFIXES)
         + len(LOCK_SUFFIXES)
         + len(SELECT_SUFFIXES)
+        + len(BUTTON_SUFFIXES)
         + len(UPDATE_SUFFIXES)
     )
     assert "unsupported device_type" in caplog.text
@@ -324,6 +326,7 @@ async def test_entry_allows_device_removal(
         *(f"sensor.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in SENSOR_SUFFIXES),
         *(f"lock.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in LOCK_SUFFIXES),
         *(f"select.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in SELECT_SUFFIXES),
+        *(f"button.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in BUTTON_SUFFIXES),
         *(f"update.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in UPDATE_SUFFIXES),
     }
 

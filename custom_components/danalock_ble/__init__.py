@@ -52,6 +52,7 @@ from custom_components.danalock_ble.update import async_register_firmware_check_
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
     Platform.LOCK,
     Platform.SELECT,
     Platform.SENSOR,

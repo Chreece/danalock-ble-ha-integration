@@ -89,6 +89,14 @@
         "name": "Twist assist"
       }
     },
+    "button": {
+      "set_point_closed": {
+        "name": "Set closed point"
+      },
+      "set_point_open": {
+        "name": "Set open point"
+      }
+    },
     "lock": {
       "lock": {
         "name": "Lock"

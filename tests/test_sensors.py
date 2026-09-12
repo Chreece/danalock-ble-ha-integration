@@ -51,6 +51,7 @@ SELECT_SUFFIXES = (
     "brake_and_go_back",
     "blocked_to_blocked",
 )
+BUTTON_SUFFIXES = ("set_point_open", "set_point_closed")
 UPDATE_SUFFIXES = ("firmware",)
 
 
@@ -108,12 +109,18 @@ async def test_platform_entities_created(
         + BINARY_SENSOR_SUFFIXES
         + LOCK_SUFFIXES
         + SELECT_SUFFIXES
+        + BUTTON_SUFFIXES
         + UPDATE_SUFFIXES
     }
 
     device = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)[0]
     for suffix in (
-        SENSOR_SUFFIXES + BINARY_SENSOR_SUFFIXES + LOCK_SUFFIXES + SELECT_SUFFIXES + UPDATE_SUFFIXES
+        SENSOR_SUFFIXES
+        + BINARY_SENSOR_SUFFIXES
+        + LOCK_SUFFIXES
+        + SELECT_SUFFIXES
+        + BUTTON_SUFFIXES
+        + UPDATE_SUFFIXES
     ):
         assert (
             registry_entry_for_unique_id(hass, entry, f"{SERIAL_NORMALIZED}_{suffix}").device_id
@@ -176,6 +183,9 @@ async def test_entity_ids_are_serial_prefixed(
     expected |= {f"lock.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in LOCK_SUFFIXES}
     expected |= {
         f"select.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in SELECT_SUFFIXES
+    }
+    expected |= {
+        f"button.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in BUTTON_SUFFIXES
     }
     expected |= {
         f"update.danalock_ble_{SERIAL_NORMALIZED}_{suffix}" for suffix in UPDATE_SUFFIXES

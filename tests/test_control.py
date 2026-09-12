@@ -3,6 +3,7 @@ factory, key refresh (specs 0006, 0007)."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
@@ -111,6 +112,7 @@ class FakeLock:
         self.information: DeviceInformation | None = make_info()
         self.settings_result: LockSettings = make_settings()
         self.setting_writes: dict[str, int] = {}
+        self.calibration_points: list[int] = []
         self.disconnects = 0
         self.on_command = None
         FakeLock.instances.append(self)
@@ -152,6 +154,17 @@ class FakeLock:
         if effect is not None:
             raise effect
         return self.settings_result
+
+    async def set_calibration_point(self, point: int, **kwargs: object) -> None:
+        self.calls.append("set_calibration_point")
+        self.calibration_points.append(point)
+        if self.on_command is not None:
+            self.on_command()
+        if self.transport_factory is not None:
+            await self.transport_factory(self.address)
+        effect = self.effects.get("set_calibration_point")
+        if effect is not None:
+            raise effect
 
     async def device_information(self, **kwargs: object) -> DeviceInformation:
         self.calls.append("device_information")
@@ -1032,3 +1045,164 @@ async def test_device_information_retry_transport_error_is_wrapped(
 
     assert fake.disconnects == 2
     assert FakeLock.instances[-1].disconnects == 1
+
+
+# --- calibration (spec 0008) --------------------------------------------------
+
+
+async def test_calibrate_reaches_facade_with_point_and_disconnects(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A calibration command passes the point to the facade and disconnects
+    (spec 0008 R2)."""
+    control, fake, _ = make_control(hass, monkeypatch)
+
+    await control.calibrate(0)
+
+    assert fake.calls == ["set_calibration_point"]
+    assert fake.calibration_points == [0]
+    assert fake.disconnects == 1
+
+
+async def test_calibrate_rejects_not_permitted(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A NOT_PERMITTED rejection maps to a permission message (R2)."""
+    control, fake, _ = make_control(hass, monkeypatch)
+    fake.effects["set_calibration_point"] = CommandError(0x40, 4, 2)
+
+    with pytest.raises(LockControlError, match="permission"):
+        await control.calibrate(1)
+    assert fake.disconnects == 1
+
+
+@pytest.mark.parametrize(
+    "effect",
+    [
+        TimeoutError("no result within 30s"),
+        ChannelClosed("peer closed the session (FIN)"),
+        BleakError("device disconnected"),
+    ],
+)
+async def test_calibrate_wraps_transport_errors(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    effect: Exception,
+) -> None:
+    """Timeout, channel, and bleak failures become HomeAssistantError (R2)."""
+    control, fake, _ = make_control(hass, monkeypatch)
+    fake.effects["set_calibration_point"] = effect
+
+    with pytest.raises(LockControlError, match="Bluetooth"):
+        await control.calibrate(0)
+    assert fake.disconnects == 1
+
+
+async def test_calibrate_token_rejection_refreshes_and_retries(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A TOKEN_VALIDITY rejection triggers one refresh and one retry (R2)."""
+    control, fake, manager = make_control(hass, monkeypatch)
+    fake.effects["set_calibration_point"] = CommandError(0x5E, 4, 2)
+
+    await control.calibrate(1)
+
+    assert manager.refresh_calls == [(SERIAL_NORMALIZED, True)]
+    retried = FakeLock.instances[-1]
+    assert retried is not fake
+    assert retried.calibration_points == [1]
+    assert retried.disconnects == 1
+
+
+async def test_calibrate_refreshes_expired_key_first(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An expired key is force-refreshed before the command (R2)."""
+    control, fake, manager = make_control(hass, monkeypatch, key=expired_key())
+
+    await control.calibrate(0)
+
+    assert manager.refresh_calls == [(SERIAL_NORMALIZED, True)]
+    rebuilt = FakeLock.instances[-1]
+    assert rebuilt is not fake
+    assert rebuilt.calibration_points == [0]
+    assert rebuilt.disconnects == 1
+
+
+async def test_calibrate_second_rejection_raises(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second TOKEN_VALIDITY rejection maps to the refresh-failure
+    message (R2)."""
+    install_fake_lock(monkeypatch)
+
+    async def _no_transport(_self: DanalockControl, _address: str) -> None:
+        return None
+
+    monkeypatch.setattr(DanalockControl, "_transport_factory", _no_transport)
+    manager = _PersistentRejectionManager(make_key(), command="set_calibration_point")
+    control = DanalockControl(hass, SERIAL_NORMALIZED, manager, make_state())
+    manager.control = control
+    FakeLock.instances[-1].effects["set_calibration_point"] = CommandError(0x5E, 4, 2)
+
+    with pytest.raises(LockControlError, match="even after a key refresh"):
+        await control.calibrate(0)
+
+    assert len(manager.refresh_calls) == 1
+
+
+class SerializingFakeLock(FakeLock):
+    """FakeLock that serializes calibration commands like the real facade.
+
+    The real facade holds one command lock per lock, so a second command
+    waits for the first. This double mirrors that behaviour to exercise the
+    HA control's concurrent presses deterministically.
+    """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._calibration_lock = asyncio.Lock()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.active = 0
+        self.max_active = 0
+
+    async def set_calibration_point(self, point: int, **kwargs: object) -> None:
+        async with self._calibration_lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.entered.set()
+            await self.release.wait()
+            self.calls.append("set_calibration_point")
+            self.calibration_points.append(point)
+            self.active -= 1
+
+
+async def test_concurrent_calibration_commands_serialize(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second calibration command waits for the in-flight one (R8)."""
+    SerializingFakeLock.instances.clear()
+    monkeypatch.setattr(
+        "custom_components.danalock_ble.control.DanalockLock", SerializingFakeLock
+    )
+
+    async def _no_transport(_self: DanalockControl, _address: str) -> None:
+        return None
+
+    monkeypatch.setattr(DanalockControl, "_transport_factory", _no_transport)
+    manager = FakeKeyManager(make_key())
+    control = DanalockControl(hass, SERIAL_NORMALIZED, manager, make_state())
+    fake = SerializingFakeLock.instances[-1]
+    fake.transport_factory = None
+
+    first = asyncio.create_task(control.calibrate(0))
+    await asyncio.wait_for(fake.entered.wait(), timeout=1.0)
+    second = asyncio.create_task(control.calibrate(1))
+    await asyncio.sleep(0.01)
+    assert fake.max_active == 1  # the second waits for the command lock
+
+    fake.release.set()
+    await asyncio.gather(first, second)
+    assert fake.calibration_points == [0, 1]
+    assert fake.disconnects == 2

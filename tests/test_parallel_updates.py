@@ -15,6 +15,7 @@ PLATFORM_MODULES: list[tuple[str, int]] = [
     ("custom_components.danalock_ble.sensor", 0),
     ("custom_components.danalock_ble.lock", 1),
     ("custom_components.danalock_ble.select", 1),
+    ("custom_components.danalock_ble.button", 1),
     ("custom_components.danalock_ble.update", 1),
 ]
 

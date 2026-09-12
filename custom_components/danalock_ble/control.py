@@ -1,5 +1,5 @@
 """Per-device lock control over the pydanalock.ble stack (specs 0006, 0007,
-0009, 0010).
+0008, 0009, 0010).
 
 One `DanalockControl` per device serial owns the `DanalockLock` facade
 (RPD+TLS+AFI session on demand) and resolves the BLE transport through Home
@@ -206,6 +206,24 @@ class DanalockControl:
         return await self._run_command(
             "end-to-end mode change",
             lambda: self._attempt_call(lambda: self._lock.set_end_to_end(mode)),
+        )
+
+    async def calibrate(self, point: int) -> None:
+        """Store one manual calibration point (spec 0008 R2).
+
+        Runs the library command through the shared attempt path: lazy
+        expired-key refresh before the attempt, one forced refresh and one
+        retry on a TOKEN_VALIDITY rejection, and connect -> command ->
+        disconnect in `finally`.
+
+        Raises:
+            LockControlError: the device rejected the command or the
+                transport failed.
+            LockAddressUnknownError: the lock address or device is unknown.
+        """
+        await self._run_command(
+            "calibration point change",
+            lambda: self._attempt_call(lambda: self._lock.set_calibration_point(point)),
         )
 
     async def set_key(self, key: DeviceKey) -> None:

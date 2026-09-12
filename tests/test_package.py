@@ -7,6 +7,8 @@ import importlib.util
 import custom_components.danalock_ble as integration
 import pydanalock.ble
 from pydanalock.ble import (
+    CALIBRATION_POINT_LOCKED,
+    CALIBRATION_POINT_UNLOCKED,
     FORMAT_VERSION_STATE,
     BatteryInfo,
     ChannelClosed,
@@ -16,6 +18,7 @@ from pydanalock.ble import (
     GattTransport,
     LockSettings,
     LockState,
+    lock_set_calibration_point,
     lock_set_setting,
     parse_settings_payload,
     version_dot,
@@ -39,9 +42,9 @@ def test_pypi_cloud_imports() -> None:
 
 
 def test_pypi_ble_imports() -> None:
-    """The installed pydanalock.ble distribution exposes the 0.9.0 public API
-    (spec 0008) and the settings API (spec 0010) from the package root."""
-    assert pydanalock.ble.__version__ == "0.9.0"
+    """The installed pydanalock.ble distribution exposes the 0.10.0 public API
+    (spec 0008 calibration, spec 0010 settings) from the package root."""
+    assert pydanalock.ble.__version__ == "0.10.0"
     assert FORMAT_VERSION_STATE == 0x02
     assert DanalockLock is not None
     assert LockState is not None
@@ -53,6 +56,8 @@ def test_pypi_ble_imports() -> None:
     assert LockSettings is not None
     assert lock_set_setting is not None
     assert parse_settings_payload is not None
+    assert lock_set_calibration_point is not None
+    assert (CALIBRATION_POINT_UNLOCKED, CALIBRATION_POINT_LOCKED) == (0, 1)
     assert version_dot((0, 32, 0)) == "0.32.0"
 
 
