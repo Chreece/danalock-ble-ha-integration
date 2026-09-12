@@ -73,6 +73,11 @@ advertisements; control and settings use the account keys.
   blocked* (end-to-end mode) as selects with verified writes (the setting is
   written and read back in the same BLE session). The displayed value follows
   the lock's own GATT report.
+- **Manual calibration** — two config buttons per lock (*Set open point* and
+  *Set closed point*) that record the current mechanical position as the
+  unlocked and locked endpoints, for when automatic calibration is not good
+  enough. Position the lock physically at the endpoint before pressing; the
+  result is reported by the lock's `point_calibrated` advertisement flag.
 - **Automatic key refresh** — a lazy pre-check before commands, a retry once
   when the lock rejects the login token, and a background refresh cycle whose
   period and jitter are configurable in hours.
@@ -187,6 +192,8 @@ name when available.
 | `select` | `select.danalock_ble_<serial>_auto_lock` | config | no |
 | `select` | `select.danalock_ble_<serial>_brake_and_go_back` | config | no |
 | `select` | `select.danalock_ble_<serial>_blocked_to_blocked` | config | no |
+| `button` | `button.danalock_ble_<serial>_set_point_open` | config | yes |
+| `button` | `button.danalock_ble_<serial>_set_point_closed` | config | yes |
 
 - `lock_state` is the real broadcast state: `on` means unlocked.
 - `twist_assist` is the lock's last physical operation — a transient flag, so
@@ -200,6 +207,15 @@ name when available.
   - `brake_and_go_back` — `off` or `3_s` … `60_s` (3–60 seconds).
   - `blocked_to_blocked` — `off`, `one`, or `two` (end-to-end mode; the
     historical entity name is kept for stable entity ids).
+- The `button` entities record the current mechanical position as the
+  unlocked (`set_point_open`) or locked (`set_point_closed`) calibration
+  endpoint. Position the lock physically at the endpoint before pressing —
+  the lock may briefly move its motor while it stores the point, and the
+  button writes no state itself. The result is reported by the lock's
+  `point_calibrated` advertisement flag; if the outcome is unsatisfactory,
+  re-run the official app's automatic calibration. Calibration buttons are
+  available once the lock's Bluetooth address is known, regardless of whether
+  the last advertisement is still fresh.
 
 Entities become `unavailable` after about 5 minutes without a valid
 advertisement, except `key_valid_until` and `firmware`, which are
@@ -226,9 +242,12 @@ target:
 Calling the core `homeassistant.update_entity` action on a firmware entity
 also triggers an immediate check.
 
-The lock and select actions follow the same rule: a failed action (for
-example no key is available for the device) raises `HomeAssistantError`,
-and an invalid select option raises `ServiceValidationError`.
+The lock, select, and button actions follow the same rule: a failed action
+(for example no key is available for the device) raises
+`HomeAssistantError`, and an invalid select option raises
+`ServiceValidationError`. Pressing a calibration button while the lock is not
+at the intended endpoint records the wrong position; the button cannot detect
+this.
 
 ## Automation examples
 
@@ -304,6 +323,7 @@ entities:
 | The entry asks you to log in again | The stored refresh token was rejected; re-authenticate from the entry menu. |
 | A lock rejects the login token | Reload the config entry to fetch a fresh key from the cloud. |
 | A setting shows `unknown` | The lock's advertisements carry only an on/off flag per setting, never the configured seconds or mode. The value is read over GATT when the select is enabled and after every write. |
+| A calibration button fails with a permission error | The account key lacks the lock-configure permission; check the key sharing in the official Danalock app. |
 | Using a different cloud account | Reconfigure or re-authenticate the entry, or remove it and add it again. |
 
 ## Known limitations
@@ -333,8 +353,6 @@ entities:
 
 Planned work — not implemented yet, no timeline or version promised:
 
-- **Manual calibration.** Automatic calibration does not always produce a
-  satisfactory result; a manual calibration flow is planned.
 - **Diagnostics support** (a quality-scale gold step) is planned.
 
 ## Removal
