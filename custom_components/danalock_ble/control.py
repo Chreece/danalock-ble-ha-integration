@@ -363,7 +363,7 @@ class DanalockControl:
         device = async_ble_device_from_address(self._hass, address, connectable=True)
         if device is None:
             raise LockAddressUnknownError(
-                "The lock is visible only through a non-connectable Bluetooth path; "
+                "No connectable Bluetooth path to the lock is available; "
                 "wait for a connectable adapter or proxy to see it."
             )
         client = await establish_connection(BleakClient, device, address)
