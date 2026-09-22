@@ -9,7 +9,7 @@ from typing import ClassVar
 
 import httpx
 import pytest
-from bleak import BleakError
+from bleak import BleakClient, BleakError
 from homeassistant.core import HomeAssistant
 
 from custom_components.danalock_ble.broadcast import DanalockDeviceState
@@ -408,94 +408,95 @@ async def test_disconnect_runs_on_facade_error_and_missing_address(
     assert fake.disconnects == 1
 
 
-class FakeBleakClient:
-    """Test double for the bleak client the factory builds."""
-
-    instances: ClassVar[list[FakeBleakClient]] = []
-
-    def __init__(self, device: object, timeout: float | None = None, **kwargs: object) -> None:
-        self.device = device
-        self.timeout = timeout
-        self.connected = False
-        self.connects = 0
-        FakeBleakClient.instances.append(self)
-
-    async def connect(self) -> None:
-        self.connected = True
-        self.connects += 1
-
-
 def install_fake_bluetooth(
     monkeypatch: pytest.MonkeyPatch,
-    device: object,
-    *,
-    connectable_only: bool = False,
-) -> list[tuple[str, bool]]:
-    """Stub the HA bluetooth device lookup; returns the calls made."""
-    calls: list[tuple[str, bool]] = []
+    device: object | None,
+) -> tuple[
+    list[tuple[str, bool]],
+    list[tuple[type[BleakClient], object, str]],
+    object,
+]:
+    """Stub HA Bluetooth lookup and retry-aware connection setup (spec 0026)."""
+    lookup_calls: list[tuple[str, bool]] = []
+    connection_calls: list[tuple[type[BleakClient], object, str]] = []
+    connected_client = object()
 
-    def lookup(_hass: HomeAssistant, address: str, connectable: bool = True) -> object | None:
-        calls.append((address, connectable))
-        if connectable and not connectable_only:
-            return device
-        if not connectable:
-            return device
-        return None
+    def lookup(
+        _hass: HomeAssistant, address: str, connectable: bool = True
+    ) -> object | None:
+        lookup_calls.append((address, connectable))
+        return device if connectable else None
+
+    async def connect(
+        client_class: type[BleakClient],
+        resolved_device: object,
+        name: str,
+        **_kwargs: object,
+    ) -> object:
+        connection_calls.append((client_class, resolved_device, name))
+        return connected_client
 
     monkeypatch.setattr(
         "custom_components.danalock_ble.control.async_ble_device_from_address", lookup
     )
-    monkeypatch.setattr("custom_components.danalock_ble.control.BleakClient", FakeBleakClient)
-    FakeBleakClient.instances.clear()
-    return calls
+    monkeypatch.setattr(
+        "custom_components.danalock_ble.control.establish_connection", connect
+    )
+    return lookup_calls, connection_calls, connected_client
 
 
-async def test_transport_factory_uses_connectable_lookup(
+async def test_transport_factory_uses_connectable_retry_aware_connection(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The transport comes from the HA bluetooth device, already connected
-    (spec 0006 R2)."""
+    """Active GATT uses a connectable HA device and establish_connection
+    (spec 0026 R1/R3/R6)."""
     install_fake_lock(monkeypatch)
     device = object()
-    calls = install_fake_bluetooth(monkeypatch, device)
+    lookup_calls, connection_calls, connected_client = install_fake_bluetooth(
+        monkeypatch, device
+    )
     state = make_state()
     control = DanalockControl(hass, SERIAL_NORMALIZED, FakeKeyManager(make_key()), state)
     state.address = "AA:BB:CC:DD:EE:FF"
 
     transport = await control._transport_factory("unused")
 
-    assert calls == [("AA:BB:CC:DD:EE:FF", True)]
-    client = FakeBleakClient.instances[-1]
-    assert client.device is device
-    assert client.connected
+    assert lookup_calls == [("AA:BB:CC:DD:EE:FF", True)]
+    assert connection_calls == [
+        (BleakClient, device, "AA:BB:CC:DD:EE:FF")
+    ]
+    assert transport._client is connected_client
     assert isinstance(transport, GattTransport)
 
 
-async def test_transport_factory_falls_back_to_non_connectable(
+async def test_transport_factory_does_not_use_non_connectable_history(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the connectable history has no device, the non-connectable
-    history is tried (spec 0006 R2)."""
+    """Advertisement-only visibility is insufficient for active GATT
+    (spec 0026 R2)."""
     install_fake_lock(monkeypatch)
-    device = object()
-    calls = install_fake_bluetooth(monkeypatch, device, connectable_only=True)
+    lookup_calls, connection_calls, _connected_client = install_fake_bluetooth(
+        monkeypatch, None
+    )
     state = make_state()
     control = DanalockControl(hass, SERIAL_NORMALIZED, FakeKeyManager(make_key()), state)
     state.address = "AA:BB:CC:DD:EE:FF"
 
-    transport = await control._transport_factory("unused")
+    with pytest.raises(LockAddressUnknownError, match="connectable"):
+        await control._transport_factory("unused")
 
-    assert calls == [("AA:BB:CC:DD:EE:FF", True), ("AA:BB:CC:DD:EE:FF", False)]
-    assert FakeBleakClient.instances[-1].connected
-    assert isinstance(transport, GattTransport)
+    assert lookup_calls == [("AA:BB:CC:DD:EE:FF", True)]
+    assert connection_calls == []
 
 
 async def test_transport_factory_without_address_fails_typed(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No advertisement seen yet: typed error, no lookup (spec 0006 R2)."""
+    """No advertisement seen yet: typed error, no lookup (spec 0026 R1)."""
     install_fake_lock(monkeypatch)
-    calls = install_fake_bluetooth(monkeypatch, object())
+    lookup_calls, connection_calls, _connected_client = install_fake_bluetooth(
+        monkeypatch, object()
+    )
     control = DanalockControl(
         hass, SERIAL_NORMALIZED, FakeKeyManager(make_key()), make_state()
     )
@@ -503,23 +504,8 @@ async def test_transport_factory_without_address_fails_typed(
     with pytest.raises(LockAddressUnknownError):
         await control._transport_factory("unused")
 
-    assert calls == []
-
-
-async def test_transport_factory_without_device_fails_typed(
-    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """No device in either bluetooth history: typed error (spec 0006 R2)."""
-    install_fake_lock(monkeypatch)
-    calls = install_fake_bluetooth(monkeypatch, None)
-    state = make_state()
-    control = DanalockControl(hass, SERIAL_NORMALIZED, FakeKeyManager(make_key()), state)
-    state.address = "AA:BB:CC:DD:EE:FF"
-
-    with pytest.raises(LockAddressUnknownError):
-        await control._transport_factory("unused")
-
-    assert calls == [("AA:BB:CC:DD:EE:FF", True), ("AA:BB:CC:DD:EE:FF", False)]
+    assert lookup_calls == []
+    assert connection_calls == []
 
 
 # --- key refresh (spec 0007) -------------------------------------------------

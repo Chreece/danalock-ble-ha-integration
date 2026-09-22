@@ -4,8 +4,8 @@
 One `DanalockControl` per device serial owns the `DanalockLock` facade
 (RPD+TLS+AFI session on demand) and resolves the BLE transport through Home
 Assistant's shared Bluetooth machinery: the address comes from the broadcast
-monitor's device state, the device from the bluetooth history
-(connectable first, non-connectable fallback). Each command connects,
+monitor's device state and a connectable device from Home Assistant's
+bluetooth history. Each command connects through the shared retry-aware connector,
 runs, and disconnects; failures map to `HomeAssistantError` subclasses with
 human-readable messages. The login token is taken from the key manager at
 construction and refreshed through it: expired keys are refetched before a
@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING, Literal, TypeVar
 
 import httpx
 from bleak import BleakClient, BleakError
+from bleak_retry_connector import establish_connection
 from homeassistant.components.bluetooth import async_ble_device_from_address
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.danalock_ble.broadcast import DanalockDeviceState
-from custom_components.danalock_ble.const import BLE_CONNECT_TIMEOUT
 from pydanalock.ble import (
     ChannelClosed,
     CommandError,
@@ -354,7 +354,7 @@ class DanalockControl:
             ) from err
 
     async def _transport_factory(self, _address: str) -> GattTransport:
-        """Build the BLE transport from the shared bluetooth history."""
+        """Build a retry-aware transport from HA's connectable BLE history."""
         address = self._state.address
         if address is None:
             raise LockAddressUnknownError(
@@ -362,12 +362,9 @@ class DanalockControl:
             )
         device = async_ble_device_from_address(self._hass, address, connectable=True)
         if device is None:
-            device = async_ble_device_from_address(self._hass, address, connectable=False)
-        if device is None:
             raise LockAddressUnknownError(
-                "The lock is not visible to the Bluetooth integration; "
-                "wait for an advertisement."
+                "No connectable Bluetooth path to the lock is available; "
+                "wait for a connectable adapter or proxy to see it."
             )
-        client = BleakClient(device, timeout=BLE_CONNECT_TIMEOUT)
-        await client.connect()
+        client = await establish_connection(BleakClient, device, address)
         return GattTransport(client)
